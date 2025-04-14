@@ -2,7 +2,7 @@
 
 ## Usage instructions
 1) Clone the repository:
-```console
+```bash
 git clone https://github.com/JokinenL/Assignment-2.git
 ```
 2) Compile the project
