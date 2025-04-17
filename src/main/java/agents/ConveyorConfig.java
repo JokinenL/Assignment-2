@@ -5,7 +5,7 @@ import java.util.List;
 
 public class ConveyorConfig implements Serializable {
     public List<String> followingConveyors;
-    public int transferTime;
+    public int transferTime; // ms
 
     public ConveyorConfig(List<String> followingConveyors, int transferTime) {
         this.followingConveyors = followingConveyors;
