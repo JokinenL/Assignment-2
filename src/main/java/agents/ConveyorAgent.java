@@ -44,6 +44,7 @@ public class ConveyorAgent extends Agent {
     private final Map<String, Double> bestCost    = new HashMap<>();
     private final Map<String, AID   > predecessor = new HashMap<>();
 
+    private String currentDestination; // To track current transfer destination
     /* ─── Setup ──────────────────────────────────────────────────────── */
     @Override
     protected void setup() {
@@ -56,6 +57,8 @@ public class ConveyorAgent extends Agent {
 
         addBehaviour(new MsgPump(this));
         addBehaviour(new BusyTimeout(this, 1_000));
+
+        currentDestination = null; // initialize currentDestination
     }
 
     /* ─── Message pump ───────────────────────────────────────────────── */
@@ -100,6 +103,7 @@ public class ConveyorAgent extends Agent {
         agree(m);
         state = BUSY;
         busySince = System.currentTimeMillis();
+        currentDestination = path.get(path.size() - 1); // Stores destination
         log.info(me + " LOAD");
 
         // Destination reached?
@@ -117,6 +121,7 @@ public class ConveyorAgent extends Agent {
             protected void onWake() {
                 log.info(me + " UNLOAD→" + next);
                 state = IDLE;
+                currentDestination = null;
                 JSONObject nx = new JSONObject();
                 nx.put("msg_type", TRANSFER_PALLET);
                 nx.put("target_path", path.subList(1, path.size()));
@@ -136,13 +141,35 @@ public class ConveyorAgent extends Agent {
 
     /** Retries load‐request until the next conveyor AGREEs. */
     private class Loader extends AchieveREInitiator {
+        private List<String> path; // To track path to transfer to
+
         Loader(Agent a, AID rec, JSONObject js) {
             super(a, buildRequest(rec, js));
+            this.path = (List<String>) js.get("target_path"); // stores the path
         }
         protected void handleRefuse(ACLMessage refuse) {
-            addBehaviour(new WakerBehaviour(myAgent, LOAD_RETRY_MS) {
-                protected void onWake() { reset(); }
-            });
+            String reason = refuse.getContent();
+            if ("DOWN".equals(reason)) {
+                String destination = path.get(path.size() - 1);
+                log.info(me + " DOWN - reroute to " + destination);
+
+                String queryID = UUID.randomUUID().toString();
+                JSONObject req = new JSONObject();
+                req.put("msg_type", FIND_PATH_REQ);
+                req.put("query_id", queryId);
+                req.put("dest", destination);
+                req.put("cost", 0);
+                req.put("path", new JSONArray());
+
+                ACLMessage r = new ACLMessage(ACLMessage.REQUEST);
+                r.addReceiver(getAID());
+                r.setContent(req.toJSONString());
+                send(r);
+            } else {
+                addBehaviour(new WakerBehaviour(myAgent, LOAD_RETRY_MS) {
+                    protected void onWake() { reset(); }
+                });
+            }
         }
     }
 
@@ -254,13 +281,17 @@ public class ConveyorAgent extends Agent {
         protected void onTick() {
             if (state == BUSY &&
                     System.currentTimeMillis() - busySince > BUSY_TIMEOUT_MS) {
+                if (currentDestination == null) {
+                    log.warning(me + " busy timeout but no current destination");
+                    return;
+                }
                 String queryId = UUID.randomUUID().toString();
-                log.info(me + " busy timeout – reroute [" + queryId + "]");
+                log.info(me + " busy timeout – reroute to " + currentDestination + "[" + queryId + "]");
 
                 JSONObject req = new JSONObject();
                 req.put("msg_type", FIND_PATH_REQ);
                 req.put("query_id", queryId);
-                req.put("dest", me);
+                req.put("dest", currentDestination);
                 req.put("cost", 0);
                 req.put("path", new JSONArray());
 
